@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 
 	"task022-merkle/internal/merkle"
 )
@@ -17,7 +18,8 @@ var ErrBadJSON = errors.New("请求体不是合法的单个 JSON 对象")
 
 // API 是 Merkle 树服务的 HTTP 接口实现。
 type API struct {
-	stats map[string]int // per-endpoint request counts (unsynchronized)
+	mu    sync.Mutex // 保护 stats，防止并发读写触发 panic
+	stats map[string]int // per-endpoint request counts
 }
 
 // New 创建服务实例。
@@ -35,6 +37,8 @@ func (a *API) Handler() http.Handler {
 
 // RequestCount returns how many requests have been served for the given endpoint.
 func (a *API) RequestCount(endpoint string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return a.stats[endpoint]
 }
 
@@ -62,7 +66,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func (a *API) health(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
 	a.stats["healthz"]++
+	a.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -84,7 +90,9 @@ type rootResponse struct {
 }
 
 func (a *API) root(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
 	a.stats["root"]++
+	a.mu.Unlock()
 	var req blocksRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errBody{OK: false, Error: err.Error()})
@@ -105,7 +113,9 @@ type proofRequest struct {
 }
 
 func (a *API) proof(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
 	a.stats["proof"]++
+	a.mu.Unlock()
 	var req proofRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errBody{OK: false, Error: err.Error()})
@@ -131,7 +141,9 @@ type verifyResponse struct {
 }
 
 func (a *API) verify(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
 	a.stats["verify"]++
+	a.mu.Unlock()
 	var req verifyRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errBody{OK: false, Error: err.Error()})
